@@ -2,98 +2,127 @@ import streamlit as st
 import google.generativeai as genai
 import time
 
-# --- 1. CONFIGURATION & STATE SETUP ---
+# --- 1. CONFIGURATION & STATE INITIALIZATION ---
 st.set_page_config(page_title="HPSC Geo-Prep", layout="wide")
 
-# Initialize Session State (This replaces React's useState)
+# This replaces React's 'useState' hooks
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "user" not in st.session_state:
     st.session_state.user = None
 if "current_mode" not in st.session_state:
     st.session_state.current_mode = "Syllabus Decoder"
+if "api_key_valid" not in st.session_state:
+    st.session_state.api_key_valid = False
 
-# --- 2. DUMMY AUTHENTICATION (Replaces LoginScreen component) ---
-# In a real app, you would connect this to your database
+# --- 2. AUTHENTICATION SERVICE (Mock DB) ---
+# Replaces your handleLogin logic
 USERS = {
-    "student": {"password": "123", "role": "Student", "profile": "Fresher"},
-    "admin": {"password": "admin", "role": "Admin", "profile": "N/A"}
+    "student": {"password": "123", "role": "Student", "profile": "Fresher", "username": "Student User"},
+    "admin": {"password": "admin", "role": "Admin", "profile": "N/A", "username": "Admin User"}
 }
 
 def authenticate(username, password):
     if username in USERS and USERS[username]["password"] == password:
-        return {"username": username, **USERS[username]}
+        return USERS[username]
     return None
 
-# --- 3. GEMINI SERVICE (Replaces sendMessageToGemini) ---
-def get_ai_response(prompt, mode, profile):
-    # Access API Key securely from Streamlit Secrets
+# --- 3. GEMINI SERVICE (Replaces geminiService.ts) ---
+def get_gemini_response(history, user_input, mode, user_profile):
+    # Try to get the API key from Streamlit Secrets (Environment Variable)
     try:
         api_key = st.secrets["GOOGLE_API_KEY"]
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-pro')
         
-        # Dynamic System Prompt based on Mode
+        # System Prompt construction based on Mode and Profile
         system_instruction = f"""
-        Role: HPSC Geography Mentor.
-        User Profile: {profile}
-        Current Mode: {mode}
+        ACT AS: HPSC Geography Mentor.
+        CONTEXT: User is a {user_profile}.
+        CURRENT MODE: {mode}
         
         INSTRUCTIONS:
-        - If mode is 'Syllabus Decoder': Explain the concept academically with HPSC relevance.
-        - If mode is 'Interview Simulator': Act as a panel. Ask one tough question at a time.
-        - If mode is 'Haryana Contextualizer': Connect the user's topic to Haryana state geography.
+        - Syllabus Decoder: Explain concepts academically.
+        - Interview Simulator: Act as a panel. Ask one question at a time.
+        - Haryana Contextualizer: Connect global concepts to Haryana geography.
         """
         
-        full_prompt = f"{system_instruction}\n\nUser Input: {prompt}"
-        response = model.generate_content(full_prompt)
+        # Create the model
+        model = genai.GenerativeModel('gemini-1.5-pro', system_instruction=system_instruction)
+        
+        # Build chat history for Gemini format
+        chat_history = []
+        for msg in history:
+            role = "user" if msg["role"] == "user" else "model"
+            chat_history.append({"role": role, "parts": [msg["text"]]})
+            
+        chat = model.start_chat(history=chat_history)
+        response = chat.send_message(user_input)
         return response.text
         
     except Exception as e:
-        return f"Error: Could not connect to Gemini. Check your API Key. ({str(e)})"
+        return f"Error connecting to AI: {str(e)}"
 
-# --- 4. UI COMPONENTS ---
+# --- 4. UI COMPONENTS (Views) ---
 
 def login_screen():
-    st.title("🔐 HPSC Geography Mentor")
-    st.write("Please log in to continue.")
-    
-    with st.form("login_form"):
-        col1, col2 = st.columns(2)
-        username = col1.text_input("Username (Try: student)")
-        password = col2.text_input("Password (Try: 123)", type="password")
-        submitted = st.form_submit_button("Login")
-        
-        if submitted:
-            user = authenticate(username, password)
-            if user:
-                st.session_state.user = user
-                st.success("Login Successful!")
-                st.rerun() # Refresh app to show the main interface
-            else:
-                st.error("Invalid Username or Password")
+    # Replaces <LoginScreen />
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        st.title("🔐 HPSC Prep Login")
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login")
+            
+            if submitted:
+                user_data = authenticate(username, password)
+                if user_data:
+                    st.session_state.user = user_data
+                    # Set default mode based on role (Logic from your handleLogin)
+                    if user_data['role'] == 'Admin':
+                        st.session_state.current_mode = "Admin Dashboard"
+                    else:
+                        st.session_state.current_mode = "Syllabus Decoder"
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials (Try: student / 123)")
 
-def sidebar():
+def sidebar_component():
+    # Replaces <Sidebar />
     with st.sidebar:
         st.header(f"👤 {st.session_state.user['username']}")
-        st.caption(f"Role: {st.session_state.user['role']}")
+        st.caption(f"Profile: {st.session_state.user['profile']}")
         
         st.divider()
         
-        # Mode Selection (Replaces AppMode logic)
-        modes = ["Syllabus Decoder", "Interview Simulator", "Haryana Contextualizer"]
+        # Mode Options
+        options = ["Syllabus Decoder", "Interview Simulator", "Haryana Contextualizer"]
         if st.session_state.user['role'] == "Admin":
-            modes.append("Admin Dashboard")
-            modes.append("Evaluation Lab")
+            options.append("Admin Dashboard")
+            options.append("Evaluation Lab")
             
-        selected_mode = st.radio("Select Preparation Mode", modes)
+        # Radio button acts as the Mode Switcher
+        selected_mode = st.radio("Select Mode", options, index=options.index(st.session_state.current_mode) if st.session_state.current_mode in options else 0)
         
-        # Handle Mode Switching (Clear chat if mode changes)
+        # Handle Mode Change Logic (Replaces handleModeChange)
         if selected_mode != st.session_state.current_mode:
             st.session_state.current_mode = selected_mode
-            st.session_state.messages = [] # Clear history
-            st.rerun()
+            st.session_state.messages = [] # Clear chat on switch
             
+            # Welcome Message Logic from your React code
+            welcome_text = ""
+            if selected_mode == "Syllabus Decoder":
+                welcome_text = f"Mode A Active: Syllabus Decoder. Which topic shall we analyze? ({st.session_state.user['profile']} Mode)"
+            elif selected_mode == "Interview Simulator":
+                welcome_text = f"Mode B Active: Interview Simulator. Type 'Ready' to begin. ({st.session_state.user['profile']} Mode)"
+            elif selected_mode == "Haryana Contextualizer":
+                welcome_text = f"Mode C Active: Connect geography concepts to Haryana. ({st.session_state.user['profile']} Mode)"
+            
+            if welcome_text:
+                st.session_state.messages.append({"role": "model", "text": welcome_text})
+            
+            st.rerun()
+
         st.divider()
         if st.button("Logout"):
             st.session_state.user = None
@@ -101,56 +130,74 @@ def sidebar():
             st.rerun()
 
 def chat_interface():
+    # Replaces <ChatInterface />
     st.subheader(f"📍 {st.session_state.current_mode}")
     
-    # Display Chat History
+    # 1. Display History
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
+        avatar = "🧑‍💻" if msg["role"] == "user" else "🤖"
+        with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["text"])
-
-    # Chat Input
-    if prompt := st.chat_input("Type here..."):
-        # 1. Add User Message
+            
+    # 2. Handle Input
+    if prompt := st.chat_input("Type your answer or question here..."):
+        # Add User Message
         st.session_state.messages.append({"role": "user", "text": prompt})
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar="🧑‍💻"):
             st.markdown(prompt)
             
-        # 2. Get AI Response
-        with st.spinner("AI is thinking..."):
-            ai_reply = get_ai_response(
-                prompt, 
-                st.session_state.current_mode, 
+        # Get AI Response
+        with st.spinner("Thinking..."):
+            response = get_gemini_response(
+                st.session_state.messages[:-1], # Pass history excluding current prompt
+                prompt,
+                st.session_state.current_mode,
                 st.session_state.user['profile']
             )
-        
-        # 3. Add AI Message
-        st.session_state.messages.append({"role": "assistant", "text": ai_reply})
-        with st.chat_message("assistant"):
-            st.markdown(ai_reply)
+            
+        # Add AI Message
+        st.session_state.messages.append({"role": "model", "text": response})
+        with st.chat_message("model", avatar="🤖"):
+            st.markdown(response)
 
 def admin_dashboard():
+    # Replaces <AdminDashboard />
     st.title("📊 Admin Dashboard")
-    st.info("Admin View: Student Performance Metrics")
+    st.success("Welcome, Admin. Here are the system metrics.")
     
-    # Placeholder Analytics
     col1, col2, col3 = st.columns(3)
-    col1.metric("Active Students", "12")
-    col2.metric("Avg Score", "7.5/10")
-    col3.metric("Weakest Topic", "Geomorphology")
+    col1.metric("Active Candidates", "42")
+    col2.metric("Avg. Interview Score", "6.8/10")
+    col3.metric("Top Weakness", "Haryana GK")
     
-    st.bar_chart({"Topic A": 30, "Topic B": 70, "Topic C": 45})
+    st.write("Recent Activity Logs:")
+    st.dataframe([
+        {"User": "Student A", "Mode": "Interview", "Score": 8, "Time": "10:00 AM"},
+        {"User": "Student B", "Mode": "Syllabus", "Score": "N/A", "Time": "10:15 AM"},
+    ])
 
-# --- 5. MAIN APP LOGIC ---
-if not st.session_state.user:
-    login_screen()
-else:
-    sidebar()
-    
-    # Render view based on mode
-    if st.session_state.current_mode == "Admin Dashboard":
-        admin_dashboard()
-    elif st.session_state.current_mode == "Evaluation Lab":
-        st.title("🧪 Evaluation Lab")
-        st.write("Deep diagnostics feature coming soon.")
+# --- 5. MAIN APP CONTROLLER ---
+def main():
+    # 1. Check API Key (Replaces ApiKeyModal check)
+    if "GOOGLE_API_KEY" not in st.secrets:
+        st.error("⚠️ Missing Google API Key. Please add it to Streamlit Secrets.")
+        return
+
+    # 2. Check Login State
+    if not st.session_state.user:
+        login_screen()
     else:
-        chat_interface()
+        # 3. Layout: Sidebar + Main Content
+        sidebar_component()
+        
+        # Router
+        if st.session_state.current_mode == "Admin Dashboard":
+            admin_dashboard()
+        elif st.session_state.current_mode == "Evaluation Lab":
+            st.title("🧪 Evaluation Lab")
+            st.info("Deep diagnostics module under construction.")
+        else:
+            chat_interface()
+
+if __name__ == "__main__":
+    main()
