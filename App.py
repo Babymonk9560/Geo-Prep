@@ -31,8 +31,9 @@ def authenticate(username, password):
 def get_gemini_response(history, user_input, mode, user_profile):
     # Try to get the API key from Streamlit Secrets (Environment Variable)
     try:
+        
         api_key = st.secrets["GOOGLE_API_KEY"]
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=AAAAC3NzaC1lZDI1NTE5AAAAIKpRG3/NIttQHh6IRmNGm8KN5H5rEhx+vKVPi7PF30lD)
         
         # System Prompt construction based on Mode and Profile
         system_instruction = f"""
